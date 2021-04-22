@@ -1,0 +1,278 @@
+
+//@version=4
+strategy("MTFIchi2", overlay=true, calc_on_every_tick=true, commission_type=strategy.commission.percent,commission_value=0.075, initial_capital = 100000,  default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+
+
+// ——————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————— TIME RANGES  —————————————————————————————————————
+// ——————————————————————————————————————————————————————————————————————————————————————
+
+startDate = input(title="Start Date", type=input.integer,
+     defval=1, minval=1, maxval=31)
+startMonth = input(title="Start Month", type=input.integer,
+     defval=1, minval=1, maxval=12)
+startYear = input(title="Start Year", type=input.integer,
+     defval=2017, minval=1800, maxval=2100)
+
+endDate = input(title="End Date", type=input.integer,
+     defval=21, minval=1, maxval=31)
+endMonth = input(title="End Month", type=input.integer,
+     defval=4, minval=1, maxval=12)
+endYear = input(title="End Year", type=input.integer,
+     defval=2021, minval=1800, maxval=2100)
+     
+// Look if the close time of the current bar
+// falls inside the date range
+inDateRange = (time >= timestamp(syminfo.timezone, startYear,
+         startMonth, startDate, 0, 0)) and
+     (time < timestamp(syminfo.timezone, endYear, endMonth, endDate, 0, 0))
+
+
+
+// ——————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————— CONFIGURATION  ———————————————————————————————————
+// ——————————————————————————————————————————————————————————————————————————————————————
+
+C00 = "Original", C01 = "Aqua", C02 = "Black", C03 = "Blue", C04 = "Coral", C05 = "Gold", C06 = "Gray", C07 = "Green", C08 = "Lime", C09 = "Maroon", C10 = "Orange", C11 = "Pink", C12 = "Red", C13 = "Violet", C14 = "Yellow", C15 = "White"
+
+_base                      = input(true, "─────── Base parameters ───────")
+conversionPeriods          = input(9, minval=1,  title="Conversion Line Periods"),
+basePeriods                = input(26, minval=1, title="Base Line Periods")
+laggingSpan2Periods        = input(52, minval=1, title="Lagging Span 2 Periods"),
+displacement               = input(26, minval=1, title="Displacement")
+isActiveFirst              = input(true, "──────── First ichimoku ───────")
+firstIchi                  = input("240",  "► Time frame", type = input.resolution)
+isActiveFirstTenkan        = input(true,  "Tenkan")
+isActiveFirstKijun         = input(true,  "Kijun")
+isActiveFirstChikou        = input(true,  "Chikou")
+isActiveFirstKumo          = input(true,  "Kumo  ──────────────")
+isActiveFirstMonoKumo      = input(false,  "  ▪ Monochrome")
+isActiveFirstLabel         = input(true,  "Label  ──────────────")
+labelFirstOffset           = input(4,     "    ▪ Offset", minval = -20, maxval = 20)
+labelFirstColor            = input(C00,   "    ▪ Color", options = [C00, C01, C02, C03, C04, C05, C06, C07, C08, C09, C10, C11, C12, C13, C14, C15])
+isActiveFirstAbbreviation  = input(true,  "  ▪ Abbreviation")
+gaps_on                    = input(false, "gaps_on: check for data to be smooth lines, but monotone and potentially less accurate")
+
+// ——————————————————————————————————————————————————————————————————————————————————————
+// ————————————————————————————————————— CONSTANTS  —————————————————————————————————————
+// ——————————————————————————————————————————————————————————————————————————————————————
+
+// ————— Ichimoku
+tenkanPeriods=conversionPeriods
+kijunPeriods=basePeriods
+SSBPeriods=laggingSpan2Periods
+displacementPeriods=displacement-1
+
+// ————— Styles
+colorVeryLightBlue=#B0B7E6
+colorLightBlue=#8893D9
+colorDarkBlue=#3E4EBD
+colorVeryLightGreen=#9AD6B7
+colorLightGreen=#59BD89
+colorDarkGreen=#327E56
+colorVeryLightOrange=#F5D8A0
+colorLightOrange=#EEB448
+colorDarkOrange=#EB8412
+colorVeryLightPink=#E1AEF0
+colorLightPink=#CF83E9
+colorDarkPink=#B949DE
+transp=65
+
+colorTest1=#A7AEE2
+colorTest2=#313E95
+
+// ————— Time
+timeOffset=time-time[1]
+
+
+// ——————————————————————————————————————————————————————————————————————————————————————
+// ————————————————————————————————————— FUNCTION  ——————————————————————————————————————
+// ——————————————————————————————————————————————————————————————————————————————————————
+
+// ————— Converts color choise
+f_stringInColor(_color) =>
+    // _color: color label (string format).
+      _color  == "Aqua"     ? #0080FFef :
+      _color  == "Black"    ? #000000ef :
+      _color  == "Blue"     ? #013BCAef :
+      _color  == "Coral"    ? #FF8080ef :
+      _color  == "Gold"     ? #CCCC00ef :
+      _color  == "Gray"     ? #808080ef :
+      _color  == "Green"    ? #008000ef :
+      _color  == "Lime"     ? #00FF00ef :
+      _color  == "Maroon"   ? #800000ef :
+      _color  == "Orange"   ? #FF8000ef :
+      _color  == "Pink"     ? #FF0080ef :
+      _color  == "Red"      ? #FF0000ef :
+      _color  == "Violet"   ? #AA00FFef :
+      _color  == "Yellow"   ? #FFFF00ef : #FFFFFFff
+
+// ————— Converts current resolution
+f_resolutionInString(_res) =>
+    // _res: resolution of any TF (in "timeframe.period" string format).
+      _res  == "1"   ? "1m"  :
+      _res  == "3"   ? "3m"  :
+      _res  == "5"   ? "5m"  :
+      _res  == "15"  ? "15m" :
+      _res  == "30"  ? "30m" :
+      _res  == "45"  ? "45m" :
+      _res  == "60"  ? "1h"  :
+      _res  == "120" ? "2h"  :
+      _res  == "180" ? "3h"  :
+      _res  == "240" ? "4h"  :
+      _res  == "1D"  ? "D"   :
+      _res  == "1W"  ? "W"   :
+      _res  == "1M"  ? "M"   : _res
+
+// ————— Returns the tenkan text
+f_getTenkanText(_res, _isAbbreviation) =>
+    // _res: resolution of any TF (in "timeframe.period" string format).
+    tf = f_resolutionInString(_res)
+    _isAbbreviation ? "Tk " + tf  : "Tenkan " + tf
+
+// ————— Returns the tenkan text
+f_getKijunText(_res, _isAbbreviation) =>
+    // _res: resolution of any TF (in "timeframe.period" string format).
+    tf = f_resolutionInString(_res)
+    _isAbbreviation ? "Kj " + tf  : "Kijun " + tf
+
+// ————— Returns the tenkan text
+f_getChikouText(_res, _isAbbreviation) =>
+    // _res: resolution of any TF (in "timeframe.period" string format).
+    tf = f_resolutionInString(_res)
+    _isAbbreviation ? "Ck " + tf  : "Chikou " + tf
+
+// ————— Converts current "timeframe.multiplier" plus the TF into minutes of type float.
+f_resolutionInMinutes() => 
+   timeframe.multiplier * (
+	 timeframe.isseconds ? 1. / 60. :
+	 timeframe.isminutes ? 1.       :
+	 timeframe.isdaily   ? 1440.    :
+	 timeframe.isweekly  ? 10080.   :
+	 timeframe.ismonthly ? 43800.   : na)
+
+
+// ————— Returns resolution of _resolution period in minutes.
+f_timeFrameResolutionInMinutes(_res) =>
+    // _res: resolution of any TF (in "timeframe.period" string format).
+    security(syminfo.tickerid, _res, f_resolutionInMinutes())
+
+// ————— Returns the average number of current chart bars in the given target HTF resolution (this reflects the dataset's history).
+f_avgDilationOf(_res) =>
+    // _res: resolution of any TF (in "timeframe.period" string format).
+    b = barssince(change(time(_res)))
+    cumTotal = cum(b == 0 ? b[1] + 1 : 0)
+    cumCount = cum(b == 0 ? 1 : 0)
+    round(cumTotal / cumCount)
+
+// ————— Returns the displacement of the resolution
+f_getDisplacement(_res) =>
+    f_avgDilationOf(_res)*displacementPeriods
+
+// ————— Returns average value between lowest and highest
+f_avgLH(_len) => avg(lowest(_len), highest(_len))
+
+// ————— Returns f_donchian data 
+f_donchian(_tf, _src) => 
+    security(syminfo.tickerid, _tf, _src[1], barmerge.gaps_off, lookahead = barmerge.lookahead_on)
+
+// ————— Returns ichimoku data
+f_ichimokuData(_isActive, _tf) =>
+    tk_avgLH = f_avgLH(tenkanPeriods)
+    kj_avgLH = f_avgLH(kijunPeriods)
+    ssb_avgLH = f_avgLH(SSBPeriods)
+	_isShow = _isActive and f_timeFrameResolutionInMinutes(_tf) >= f_resolutionInMinutes()
+	_displacement = _isShow ?  f_getDisplacement(_tf) : na
+	_tenkan = _isShow ? f_donchian(_tf, tk_avgLH) : na
+	_kijun = _isShow ? f_donchian(_tf, kj_avgLH) : na
+	_chikou = _isShow ? f_donchian(_tf, close) : na
+	_SSA = _isShow ? avg(_tenkan, _kijun) : na
+	_SSB = _isShow ? f_donchian(_tf, ssb_avgLH) : na
+	_middleKumo = _isShow ? _SSA[0] > _SSB[0] ? _SSA[0] - (abs(_SSA[0]-_SSB[0])/2) : _SSA[0] + (abs(_SSA[0]-_SSB[0])/2) : na
+	[_displacement, _tenkan, _kijun, _chikou, _SSA, _SSB, _middleKumo]
+
+// ——————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————— FIRST ICHIMOKU  ——————————————————————————————————
+// ——————————————————————————————————————————————————————————————————————————————————————
+
+[firstDisplacement, firstTenkan, firstKijun, firstChikou, firstSSA, firstSSB, fisrtMiddleKumo] = f_ichimokuData(isActiveFirst, firstIchi)
+
+// ————— Tenkan
+plot(isActiveFirstTenkan ? firstTenkan : na, color=color.aqua, title="First Tenkan", linewidth=3)
+// ————— Kijun
+plot(isActiveFirstKijun ? firstKijun : na, color=color.red, title="First Kijun", linewidth=3)
+// ————— Chikou
+plot(isActiveFirstChikou ? firstChikou : na, offset = -firstDisplacement, color=color.yellow, title="First Chikou")
+
+// ----- Calculate colors
+Kumo_line_color = firstSSA > firstSSB ? color.new(color.lime, 0) : color.new(color.red, 0)
+
+// ————— SSA + SSB
+ssaFirst=plot(isActiveFirstKumo ? firstSSA : na, offset = firstDisplacement, color=Kumo_line_color, title="First SSA", linewidth=1)
+ssbFirst=plot(isActiveFirstKumo ? firstSSB : na, offset = firstDisplacement, color=Kumo_line_color, title="First SSB", linewidth=1)
+fill(ssaFirst, ssbFirst, color = gaps_on ? colorVeryLightBlue : (firstSSA > firstSSB ? color.green : color.maroon), transp=transp, title="First Kumo", fillgaps=true)
+
+// ——————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————————— LABEL ————————————————————————————————————————
+// ——————————————————————————————————————————————————————————————————————————————————————
+
+var label firstTenkanLabel = na
+var label firstKijunLabel = na
+var label firstChikouLabel = na
+var label firstKumoLabel = na
+
+label.delete(firstTenkanLabel)
+label.delete(firstKijunLabel)
+label.delete(firstChikouLabel)
+label.delete(firstKumoLabel)
+
+if isActiveFirst and isActiveFirstLabel and f_timeFrameResolutionInMinutes(firstIchi) >= f_resolutionInMinutes()
+    offsetLabelFirst=time+(timeOffset*labelFirstOffset)
+    offsetFirst=labelFirstOffset < 0 ? labelFirstOffset : 0
+    offsetDisplacementFirst=timeOffset*(firstDisplacement-labelFirstOffset)
+    if isActiveFirstTenkan
+        firstTenkanLabel:=label.new(x=offsetLabelFirst, y=firstTenkan[offsetFirst], xloc=xloc.bar_time, style=label.style_none)
+        label.set_text(firstTenkanLabel, f_getTenkanText(firstIchi, isActiveFirstAbbreviation))
+        label.set_textcolor(firstTenkanLabel, labelFirstColor == 'Original' ? colorDarkBlue : f_stringInColor(labelFirstColor))
+    if isActiveFirstKijun
+        firstKijunLabel:=label.new(x=offsetLabelFirst, y=firstKijun[offsetFirst], xloc=xloc.bar_time, style=label.style_none)
+        label.set_text(firstKijunLabel, f_getKijunText(firstIchi, isActiveFirstAbbreviation))
+        label.set_textcolor(firstKijunLabel, labelFirstColor == 'Original' ? colorDarkBlue : f_stringInColor(labelFirstColor))
+    if isActiveFirstChikou
+        firstChikouLabel:=label.new(x=time-offsetDisplacementFirst,y=firstChikou[1], xloc=xloc.bar_time, style=label.style_none)
+        label.set_text(firstChikouLabel, f_getChikouText(firstIchi, isActiveFirstAbbreviation))
+        label.set_textcolor(firstChikouLabel, labelFirstColor == 'Original' ? colorDarkBlue : f_stringInColor(labelFirstColor))
+    if isActiveFirstKumo
+        firstKumoLabel:=label.new(x=time+offsetDisplacementFirst,y=fisrtMiddleKumo, xloc=xloc.bar_time, style=label.style_none)
+        label.set_text(firstKumoLabel, "Kumo "+f_resolutionInString(firstIchi))
+        label.set_textcolor(firstKumoLabel, labelFirstColor == 'Original' ? colorDarkBlue : f_stringInColor(labelFirstColor))
+        
+        
+// ——————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————————— TRADES ———————————————————————————————————————
+// ——————————————————————————————————————————————————————————————————————————————————————
+
+// Analyze Buy/sell times
+buy = close > firstSSA[26] and close > firstSSB[26] and crossover(firstTenkan, firstKijun)
+sell = close < firstSSA[26] and close < firstSSB[26] and crossunder(firstTenkan, firstKijun)
+
+    
+strategy.entry("Buy", strategy.long, when = buy and inDateRange)
+strategy.entry("Sell", strategy.short, when = sell and inDateRange)
+
+if (strategy.position_size > 0)
+    longStopPrice  = strategy.position_avg_price * (1 - 0.10)
+    strategy.exit("Stop Loss Long", "Buy", stop = longStopPrice )
+
+    
+if (strategy.position_size < 0)
+    shortStopPrice  = strategy.position_avg_price * (1 + 0.10)
+    strategy.exit("Stop Loss Short", "Sell", stop = shortStopPrice )
+
+if (not inDateRange)
+    strategy.close_all()
+
+
+
+
+
