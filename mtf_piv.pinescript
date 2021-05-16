@@ -1,0 +1,369 @@
+//@version=4
+//@author=jyang98il
+// personal contribution: added in EMA functionality and converted the code to a strategy
+// developed a trading strategy based upon the pivots.
+
+// Inspired by - Pivots MTF [LucF]
+//  v1.3, 2020.12.16 08:43 — LucF
+// Shows Hi/Lo pivots using a user-selected higher timeframe.
+// This code was written using the following standards:
+//  • PineCoders Coding Conventions for Pine: http://www.pinecoders.com/coding_conventions/
+//  • PineCoders MTF Selection Framework: https://www.tradingview.com/script/90mqACUV-MTF-Selection-Framework-PineCoders-FAQ/
+maxBarsBack = 4999  // Maximum: 4999.
+strategy("MTFPiv", "MTFPiv", true, calc_on_every_tick = true, max_bars_back = maxBarsBack, max_lines_count = 500, max_labels_count = 500)
+
+// ———————————————————— Constants
+// {
+CS0 = "Lime/Red", CS1 = "Aqua/Pink", CS2 = "Coral/Violet"
+TF0 = "None", TF1 = "Auto-Steps (15min, 60min, 4H, 1D, 3D, 1W, 1M, 12M)", TF2 = "Multiple Of Current TF", TF3 = "Fixed TF"
+TX0 = "Same as Color Theme", TX1 = "Neutral"
+MS0 = "None", MS1 = "Running value", MS2 = "Last value", MS3 = "Both"
+MM0 = "Mean", MM1 = "Median"
+TB0 = "Varying", TB1 = "Always high"
+MD0 = "Both", MD1 = "Longs Only", MD2 = "Shorts Only"
+// }
+
+// ———————————————————— Inputs
+// {
+_2                  = input(true,           "═══════════ Display ════════════")
+i_colorScheme       = input(CS2,            "Color Scheme",                 options = [CS0, CS1, CS2])
+i_qtyPivots         = input(5,             "Quantity of displayed pivots", minval  = 1, maxval = 249)
+i_lineThicknessH    = input(1,              "Hi Pivot Thickness",           minval  = 1)
+i_lineBrightnessH   = input(4,              "Hi Pivot Brightness",          minval  = 1, maxval = 8)
+i_lineThicknessL    = input(1,              "Lo Pivot Thickness",           minval  = 1)
+i_lineBrightnessL   = input(4,              "Lo Pivot Brightness",          minval  = 1, maxval = 8)
+i_meanOrMedianDisp  = input(MS0,            "Show Mean/Median",             options = [MS0, MS1, MS2, MS3])
+i_meanOrMedianCalc  = input(MM0,            "  Calculation",                options = [MM0, MM1])
+i_meanThickness     = input(20,             "  Thickness",                  minval  = 1)
+i_meanBrightness    = input(2,              "  Brightness",                 minval  = 1, maxval = 8)
+i_meanOffset        = input(1000,           "  Last value's Offset Left",   minval  = 0, maxval = 2500, step = 100)
+i_highlightLast     = input(true,           "Highlight last pivots")
+i_showPrices        = input(true,           "Show Prices")
+i_textColor         = input(TX0,            "  Text Color",                 options = [TX0, TX1])
+i_textBrightness    = input(TB0,            "  Text Brightness",            options = [TB0, TB1])
+i_textSize          = input(3,              "  Text Size",                  minval  = 1, maxval = 5)
+i_htfShow           = input(true,           "Show HTF Used")
+i_offsetLabels      = input(3,              "  Text Offset")
+_4                  = input(true,           "═════════ HTF Selection ══════════")
+i_htfType           = input(TF3,            "Higher Timeframe Selection",   options = [TF0, TF1, TF2, TF3])
+i_htfType2          = input(3.,             "  2. Multiple of Current TF",  minval  = 1)
+i_htfType3          = input("240",            "  3. Fixed TF",                type    = input.resolution)
+i_htfRepaints       = input(false,          "Repainting HTF")
+_6                  = input(true,           "═════════ Alert Markers ══════════")
+i_markerDirection   = input(MD0,            "Direction",                    options = [MD0, MD1, MD2])
+i_showMarker1       = input(false,          "1. Hi Pivot Crossover")
+i_showMarker2       = input(false,          "2. Hi Pivot Crosunder")
+i_showMarker3       = input(false,          "3. Lo Pivot Crossover")
+i_showMarker4       = input(false,          "4. Lo Pivot Crosunder")
+i_showMarker5       = input(false,          "5. Hi Mean Crossover")
+i_showMarker6       = input(false,          "6. Hi Mean Crosunder")
+i_showMarker7       = input(false,          "7. Lo Mean Crossover")
+i_showMarker8       = input(false,          "8. Lo Mean Crosunder")
+_8                  = input(true,           "═══════════ Options ════════════")
+i_srcH              = input(high,           "Hi Pivots Source")
+i_srcL              = input(low,            "Lo Pivots Source")
+i_legLeft           = input(4,              "Left Pivot Leg (bars)",         minval  = 1)
+i_legRight          = input(4,              "Right Pivot Leg (bars)",        minval  = 1)
+
+// Marker direction.
+longsOnly       = i_markerDirection == MD1
+shortsOnly      = i_markerDirection == MD2
+// HTF is being used.
+var htfOn       = i_htfType != TF0
+// Price text size.
+var labelSize   = i_textSize == 1 ? size.tiny : i_textSize == 2 ? size.small : i_textSize == 3 ? size.normal : i_textSize == 4 ? size.large : size.huge
+// }
+
+// ———————————————————— Functions
+// {
+// ————— Generate colors for pivot lines and text using user-selected color scheme and brightness levels.
+f_cGreen(_b)    => _b == 8 ? #00FF00ff : _b == 7 ? #00FF00d0 : _b == 6 ? #00FF00b0 : _b == 5 ? #00FF0090 : _b == 4 ? #00FF0070 : _b == 3 ? #00FF0050 : _b == 2 ? #00FF0020 : _b == 1 ? #00FF0010 : na
+f_cAqua(_b)     => _b == 8 ? #00C0FFff : _b == 7 ? #00C0FFd0 : _b == 6 ? #00C0FFb0 : _b == 5 ? #00C0FF90 : _b == 4 ? #00C0FF70 : _b == 3 ? #00C0FF50 : _b == 2 ? #00C0FF20 : _b == 1 ? #00C0FF10 : na
+f_cOrange(_b)   => _b == 8 ? #FF8080ff : _b == 7 ? #FF8080d0 : _b == 6 ? #FF8080b0 : _b == 5 ? #FF808090 : _b == 4 ? #FF808070 : _b == 3 ? #FF808050 : _b == 2 ? #FF808020 : _b == 1 ? #FF808018 : na
+f_cRed(_b)      => _b == 8 ? #FF0000ff : _b == 7 ? #FF0000d0 : _b == 6 ? #FF0000b0 : _b == 5 ? #FF000090 : _b == 4 ? #FF000070 : _b == 3 ? #FF000050 : _b == 2 ? #FF000020 : _b == 1 ? #FF000010 : na
+f_cPink(_b)     => _b == 8 ? #FF0080ff : _b == 7 ? #FF0080d0 : _b == 6 ? #FF0080b0 : _b == 5 ? #FF008090 : _b == 4 ? #FF008070 : _b == 3 ? #FF008050 : _b == 2 ? #FF008020 : _b == 1 ? #FF008010 : na
+f_cViolet(_b)   => _b == 8 ? #AA00FFff : _b == 7 ? #AA00FFd0 : _b == 6 ? #AA00FFb0 : _b == 5 ? #AA00FF90 : _b == 4 ? #AA00FF70 : _b == 3 ? #AA00FF50 : _b == 2 ? #AA00FF38 : _b == 1 ? #AA00FF20 : na
+f_colorH(_b)    => i_colorScheme == CS0 ? f_cGreen(_b) : i_colorScheme == CS1 ? f_cAqua(_b) : f_cOrange(_b)
+f_colorL(_b)    => i_colorScheme == CS0 ? f_cRed(_b)   : i_colorScheme == CS1 ? f_cPink(_b) : f_cViolet(_b)
+var colorPH     =  f_colorH(i_lineBrightnessH)
+var colorPL     =  f_colorL(i_lineBrightnessL)
+var colorTextPH =  i_textBrightness == TB0 ? i_textColor == TX0 ? colorPH  : color.gray : i_textColor == TX0 ? f_colorH(5) : color.new(color.gray, 0)
+var colorTextPL =  i_textBrightness == TB0 ? i_textColor == TX0 ? colorPL  : color.gray : i_textColor == TX0 ? f_colorL(5) : color.new(color.gray, 0)
+// ————— Round prices to tick.
+f_roundToTick( _price) => round(_price / syminfo.mintick) * syminfo.mintick
+
+// ————— Produces a string format usable with `tostring()` to restrict precision to ticks.
+//  • Note that `tostring()` will also round the value.
+f_tickFormat() =>
+    _s = tostring(syminfo.mintick)
+    _s := str.replace_all(_s, "25", "00")
+    _s := str.replace_all(_s, "5",  "0")
+    _s := str.replace_all(_s, "1",  "0")
+
+// ————— Queues a new element in an array and de-queues its first element.
+f_qDq(_array, _val) =>
+    array.push(_array, _val)
+    array.shift(_array)
+
+// ————— Lookback to find chart bar where pivot occured.
+f_offsetToP(_src, _pivotPrice, _maxBack) =>
+    int _offset = na
+    float _delta = 10e10
+    if not na(_pivotPrice)
+        // There is a pivot price to check; loop back in limited number of bars for closest level matching pivot.
+        for _i = 1 to _maxBack
+            _thisDelta = abs(_src[_i] - _pivotPrice)
+            if _thisDelta < _delta
+                // Closer price found; save its offset.
+                _delta := _thisDelta
+                _offset := _i
+    _offset
+
+// —————————— PineCoders MTF Selection Framework functions
+// ————— Converts current "timeframe.multiplier" plus the TF into minutes of type float.
+f_resInMinutes() =>
+    _resInMinutes = timeframe.multiplier * (
+      timeframe.isseconds   ? 1. / 60.  :
+      timeframe.isminutes   ? 1.        :
+      timeframe.isdaily     ? 1440.     :
+      timeframe.isweekly    ? 10080.    :
+      timeframe.ismonthly   ? 43800.    : na)
+
+// ————— Returns resolution of _resolution period in minutes.
+f_tfResInMinutes(_resolution) =>
+    // _resolution: resolution of any TF (in "timeframe.period" string format).
+    security(syminfo.tickerid, _resolution, f_resInMinutes())
+
+// ————— Given current resolution, returns next step of HTF.
+f_resNextStep(_res) =>
+    // _res: current TF in fractional minutes.
+    _res    <= 1        ? "15"  :
+      _res  <= 5        ? "60"  :
+      _res  <= 30       ? "240" :
+      _res  <= 60       ? "1D"  :
+      _res  <= 360      ? "3D"  :
+      _res  <= 1440     ? "1W"  :
+      _res  <= 10080    ? "1M"  : "12M"
+
+// ————— Returns a multiple of current resolution as a string in "timeframe.period" format usable with "security()".
+f_multipleOfRes(_res, _mult) =>
+    // _res:  current resolution in minutes, in the fractional format supplied by f_resInMinutes() companion function.
+    // _mult: Multiple of current TF to be calculated.
+    // Convert current float TF in minutes to target string TF in "timeframe.period" format.
+    _targetResInMin = _res * max(_mult, 1)
+    _targetResInMin     <= 0.083        ? "5S"  :
+      _targetResInMin   <= 0.251        ? "15S" :
+      _targetResInMin   <= 0.501        ? "30S" :
+      _targetResInMin   <= 1440         ? tostring(round(_targetResInMin)) :
+      _targetResInMin   <= 43800        ? tostring(round(min(_targetResInMin / 1440, 365))) + "D" :
+      tostring(round(min(_targetResInMin / 43800, 12))) + "M"
+
+// ————— Print a label at end of chart.
+f_htfLabel(_txt, _y, _color, _offsetLabels) =>
+    _t = int(time + (f_resInMinutes() * _offsetLabels * 60000))
+    var _lbl = label.new(_t, _y, _txt, xloc.bar_time, yloc.price, #00000000, label.style_none, color.gray, size.large)
+    if barstate.islast
+        label.set_xy(_lbl, _t, _y)
+        label.set_text(_lbl, _txt)
+        label.set_textcolor(_lbl, _color)
+// }
+
+
+
+// ———————————————————— Calcs
+// {
+// Arrays holding pivot line id's, label id's and prices.
+var pHiLines  = array.new_line(i_qtyPivots)
+var pLoLines  = array.new_line(i_qtyPivots)
+var pHiLabels = array.new_label(i_qtyPivots)
+var pLoLabels = array.new_label(i_qtyPivots)
+var pHiPrices = array.new_float(i_qtyPivots)
+var pLoPrices = array.new_float(i_qtyPivots)
+
+// ————— HTF calcs
+// Get current resolution in float minutes.
+var resInMinutes = f_resInMinutes()
+// Get HTF from user-defined mode.
+var htf = i_htfType == TF0 ? timeframe.period : i_htfType == TF1 ? f_resNextStep(resInMinutes) : i_htfType == TF2 ? f_multipleOfRes(resInMinutes, i_htfType2) : i_htfType3
+// Vertical position of label.
+labelY = sma(high + 3 * tr, 10)[1]
+// If current res is not lower than HTF, print warning at right of chart.
+if htfOn and resInMinutes >= f_tfResInMinutes(htf)
+    f_htfLabel("Chart\nresolution\nmust be < " + htf, labelY, color.silver, i_offsetLabels)
+else
+    // Show calculated HTF when needed.
+    if htfOn and i_htfShow
+        f_htfLabel(htf, labelY, color.silver, i_offsetLabels)
+
+// ————— Number of chart bars back contained in one HTF bar.
+chartBarsInHtf = int(f_tfResInMinutes(htf) / resInMinutes)
+// ————— Starting point offset where we can begin searching for a pivot.
+chartBarsOffset = int(((i_legRight) * chartBarsInHtf) + (i_htfRepaints ? 0 : 1))
+
+//
+// ————— Pivot calcs
+//
+pH    = pivothigh(i_srcH, i_legLeft, i_legRight)
+pL    = pivotlow( i_srcL, i_legLeft, i_legRight)
+
+// maintain the last pivot high and last pivot low on the LTF
+// if we have a new pH or pL, then we update the last_pH_ltf, else we move it along with the previous value
+// this is useful because we alwasy have a last pivot high / low
+found_ph = not na(pH)
+last_pH_ltf = 0.0
+last_pH_ltf := found_ph ? pH : last_pH_ltf[1]
+plot(last_pH_ltf, title="last_pivot_high_ltf", color=color.green, offset = -i_legRight, transp=0)
+
+found_pl = not na(pL)
+last_pL_ltf = 0.0
+last_pL_ltf := found_pl ? pL : last_pL_ltf[1]
+plot(last_pL_ltf, title="last_pivot_low_ltf", color=color.maroon, offset = -i_legRight, transp=0)
+
+// get HTF pivots
+htfPH = not htfOn ? pH : i_htfRepaints ? security(syminfo.tickerid, htf, pH) : security(syminfo.tickerid, htf, pH[1], lookahead = barmerge.lookahead_on)
+last_pH_htf = 0.0
+last_pH_htf := not na(htfPH) ? htfPH : last_pH_htf[1]
+// plot(last_pH_htf, title="last pivot high HTF", color=color.aqua, offset = -64)
+
+htfPL = not htfOn ? pL : i_htfRepaints ? security(syminfo.tickerid, htf, pL) : security(syminfo.tickerid, htf, pL[1], lookahead = barmerge.lookahead_on)
+last_pL_htf = 0.0
+last_pL_htf := not na(htfPL) ? htfPL : last_pL_htf[1]
+// plot(last_pL_htf, title="last pivot low HTF", color=color.purple, offset = -64)
+
+newPH = na(htfPH[1]) and not(na(htfPH))
+newPL = na(htfPL[1]) and not(na(htfPL))
+
+// In case a pivot is found, find the offset to the bar matching its level [these functions need to be called on each bar]. Only send pivot value when one is found, so loop isn't executed on every bar.
+offsetToPH = f_offsetToP(i_srcH, newPH ? htfPH : na, min(maxBarsBack, max(30, chartBarsOffset + chartBarsInHtf + 1)))
+offsetToPL = f_offsetToP(i_srcL, newPL ? htfPL : na, min(maxBarsBack, max(30, chartBarsOffset + chartBarsInHtf + 1)))
+
+// Pivot values and line/label ids (each pivot uses a line and, if user-selected, a label for the price).
+line    linePH  = na
+line    linePL  = na
+// —————————— Main block where we decide first if we can run the rest of the script.
+if chartBarsOffset > maxBarsBack
+    // Dilation of HTF contains too many bars. Would cause referencing errors; can't run logic.
+    f_htfLabel("Can't run indicator.\nGap between chart res\nand HTF is too large.\n" + tostring(chartBarsOffset, "(#)"), labelY, f_cRed(8), i_offsetLabels)
+    float(na)
+else
+    // ————— If a new pivot is found, draw a new line and label at the offset found.
+    if newPH
+        // Draw new pivot line.
+        linePH := line.new(bar_index - offsetToPH, htfPH, bar_index, htfPH, xloc.bar_index, extend.right, colorPH, line.style_solid, i_lineThicknessH)
+        // Queue new pivot line and delete de-queued one.
+        line.delete(f_qDq(pHiLines, linePH))
+        // Queue new pivot's price.
+        f_qDq(pHiPrices, htfPH)
+        // Display price if needed.
+        if i_showPrices
+            // Draw new label.
+            labelPH = label.new(bar_index - offsetToPH, htfPH, "    " + tostring(f_roundToTick(htfPH), f_tickFormat()), xloc.bar_index, yloc.price, #00000000, label.style_none, colorTextPH, labelSize)
+            // Queue new price label and delete de-queued one.
+            label.delete(f_qDq(pHiLabels, labelPH))
+    if newPL
+        linePL := line.new(bar_index - offsetToPL, htfPL, bar_index, htfPL, xloc.bar_index, extend.right, colorPL, line.style_solid, i_lineThicknessL)
+        line.delete(f_qDq(pLoLines, linePL))
+        f_qDq(pLoPrices, htfPL)
+        if i_showPrices
+            labelPL = label.new(bar_index - offsetToPL, htfPL, "         " + tostring(f_roundToTick(htfPL), f_tickFormat()), xloc.bar_index, yloc.price, #00000000, label.style_none, colorTextPL, labelSize)
+            label.delete(f_qDq(pLoLabels, labelPL))
+
+    // ————— Make last hi and lo pivot lines thicker, if required.
+    if barstate.islast and i_highlightLast
+        line.set_width(array.get(pHiLines, i_qtyPivots - 1), i_lineThicknessH * 4)
+        line.set_width(array.get(pLoLines, i_qtyPivots - 1), i_lineThicknessL * 4)
+    float(na)
+
+// ————— Mean/Median.
+mmPH = i_meanOrMedianCalc == MM0 ? array.avg(pHiPrices) : array.median(pHiPrices)
+mmPL = i_meanOrMedianCalc == MM0 ? array.avg(pLoPrices) : array.median(pLoPrices)
+// Display last level.
+var line lineMmPH = line.new(nz(bar_index[1]), high, bar_index, high, xloc.bar_index, extend.right, f_colorH(i_meanBrightness), line.style_solid, i_meanThickness)
+var line lineMmPL = line.new(nz(bar_index[1]), low,  bar_index, low,  xloc.bar_index, extend.right, f_colorL(i_meanBrightness), line.style_solid, i_meanThickness)
+if (i_meanOrMedianDisp == MS2 or i_meanOrMedianDisp == MS3) and barstate.islast
+    line.set_xy1(lineMmPH, bar_index - i_meanOffset - 1, mmPH)
+    line.set_xy2(lineMmPH, bar_index,  mmPH)
+    line.set_xy1(lineMmPL, bar_index - i_meanOffset - 1, mmPL)
+    line.set_xy2(lineMmPL, bar_index,  mmPL)
+// Plot running value.
+// plot(i_meanOrMedianDisp == MS1 or i_meanOrMedianDisp == MS3 ? mmPH : na, "Hi Running Mean", f_colorH(6), i_lineThicknessH)
+// plot(i_meanOrMedianDisp == MS1 or i_meanOrMedianDisp == MS3 ? mmPL : na, "Lo Running Mean", f_colorL(6), i_lineThicknessL)
+// }
+
+// ———————————————————— Markers and Alerts
+// {
+// Function returns true when a cross is detected between the close and one of the pivots in the last n displayed.
+f_pivotCross(_direction, _pivots) =>
+    // _direction: direction of the cross to detect ("over" or "under").
+    // _pivots   : array of pivot prices to be tested against.
+    _return = false
+    for _i = i_qtyPivots - 1 to 0
+        _pivotPrice = array.get(_pivots, _i)
+        if _direction == "over" and close[1] < _pivotPrice and close > _pivotPrice
+            _return := true
+            break
+        else if _direction == "under" and close[1] > _pivotPrice and close < _pivotPrice
+            _return := true
+            break
+    _return
+
+// ————— Conditions
+// C1U = f_pivotCross("over",  pHiPrices)
+// C2D = f_pivotCross("under", pHiPrices)
+// C3U = f_pivotCross("over",  pLoPrices)
+// C4D = f_pivotCross("under", pLoPrices)
+
+// ————— EMA calculations
+ema_13 = ema(close, 13)
+ema_13_htf = i_htfRepaints ? security(syminfo.tickerid, htf, ema_13) : security(syminfo.tickerid, htf, ema_13[1], lookahead = barmerge.lookahead_on)
+ema_21 = ema(close, 21)
+ema_21_htf = i_htfRepaints ? security(syminfo.tickerid, htf, ema_21) : security(syminfo.tickerid, htf, ema_21[1], lookahead = barmerge.lookahead_on)
+ema_50 = ema(close, 50)
+ema_50_htf = i_htfRepaints ? security(syminfo.tickerid, htf, ema_50) : security(syminfo.tickerid, htf, ema_50[1], lookahead = barmerge.lookahead_on)
+ema_180 = ema(close, 180)
+ema_180_htf = i_htfRepaints ? security(syminfo.tickerid, htf, ema_180) : security(syminfo.tickerid, htf, ema_180[1], lookahead = barmerge.lookahead_on)
+
+// plot(ema_13_htf, title="EMA 13 HTF", color = color.orange, transp = 30, linewidth = 2)
+// plot(ema_21_htf, title="EMA 21 HTF", color = color.yellow, transp = 30, linewidth = 2)
+// plot(ema_50_htf, title="EMA 50 HTF", color = color.red, transp = 30, linewidth = 2)
+// plot(ema_180_htf, title="EMA 180 HTF", color = color.blue, transp = 30, linewidth = 2)
+
+// ——————————————————————————————————————————————————————————————————————————————————————
+// ——————————————————————————————————————— TRADES ———————————————————————————————————————
+// ——————————————————————————————————————————————————————————————————————————————————————
+
+var long_stop = last_pL_ltf
+var short_stop = last_pH_ltf
+
+// not doing crossover here because we want to enter at a specific point
+buy = ema_13_htf > ema_21_htf
+      and ema_21_htf > ema_50_htf
+      and ema_50_htf > ema_180_htf
+      and close > last_pL_ltf
+
+sell = ema_13_htf < ema_21_htf
+      and ema_21_htf < ema_50_htf
+      and ema_50_htf < ema_180_htf
+      and close < last_pH_ltf
+
+// if we have a buy signal, look when to enter
+enter_long = buy and close > last_pH_htf
+enter_short = sell and close < last_pL_htf
+
+long_stop := (enter_long and strategy.position_size == 0) ? last_pL_ltf - syminfo.mintick : long_stop
+short_stop := (enter_short and strategy.position_size == 0) ? last_pH_ltf + syminfo.mintick : short_stop
+
+strategy.entry("Buy", strategy.long, when = enter_long)
+strategy.entry("Sell", strategy.short, when = enter_short)
+
+if (strategy.position_size > 0)
+    strategy.exit("Stop Loss Long PivLo LTF", "Buy", stop = long_stop)
+
+    take_profit = crossunder(ema_13_htf, ema_21_htf)
+    strategy.close("Buy", when = take_profit, comment = "Long Close: Crossover HTF")
+
+if (strategy.position_size < 0)
+    strategy.exit("Stop Loss Short PivHi LTF", "Sell", stop = short_stop)
+
+    take_profit = crossover(ema_13_htf, ema_21_htf)
+    strategy.close("Sell", when = take_profit, comment = "Short close: Crossover HTF")
