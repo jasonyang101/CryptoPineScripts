@@ -1,0 +1,472 @@
+// © jyang98il
+//@version=4
+
+maxBarsBack = 4999  // Maximum: 4999.
+strategy("SuppResLevelsFinal", "SuppResLevelsFinal", true, calc_on_every_tick = true, max_bars_back = maxBarsBack, max_lines_count = 500, max_labels_count = 500)
+
+// ———————————————————— Constants
+// {
+CS0 = "Lime/Red", CS1 = "Aqua/Pink", CS2 = "Coral/Violet"
+TF0 = "None", TF1 = "Auto-Steps (15min, 60min, 4H, 1D, 3D, 1W, 1M, 12M)", TF2 = "Multiple Of Current TF", TF3 = "Fixed TF"
+TX0 = "Same as Color Theme", TX1 = "Neutral"
+MS0 = "None", MS1 = "Running value", MS2 = "Last value", MS3 = "Both"
+MM0 = "Mean", MM1 = "Median"
+TB0 = "Varying", TB1 = "Always high"
+MD0 = "Both", MD1 = "Longs Only", MD2 = "Shorts Only"
+// }
+
+// ———————————————————— Inputs
+// {
+_2                  = input(true,           "═══════════ Display ════════════")
+i_qtyPivots         = input(15,             "Quantity of saved pivots", minval  = 1, maxval = 249)
+i_showAll           = input(false,          "Show all Pivot points?")
+i_highlightLast     = input(true,           "Highlight last pivots")
+i_showPrices        = input(true,           "Show Prices")
+i_textColor         = input(TX0,            "  Text Color",                 options = [TX0, TX1])
+i_textBrightness    = input(TB0,            "  Text Brightness",            options = [TB0, TB1])
+i_textSize          = input(3,              "  Text Size",                  minval  = 1, maxval = 5)
+i_htfShow           = input(true,           "Show HTF Used")
+i_offsetLabels      = input(3,              "  Text Offset")
+_4                  = input(true,           "═════════ HTF Selection ══════════")
+i_htfType           = input(TF3,            "Higher Timeframe Selection",   options = [TF0, TF1, TF2, TF3])
+i_htfType2          = input(3.,             "  2. Multiple of Current TF",  minval  = 1)
+i_htfType3          = input("360",            "  3. Fixed TF",                type    = input.resolution)
+i_htfRepaints       = input(false,          "Repainting HTF")
+_8                  = input(true,           "═══════════ Options ════════════")
+i_srcH              = input(high,           "Hi Pivots Source")
+i_srcL              = input(low,            "Lo Pivots Source")
+i_legLeft           = input(5,              "Left Pivot Leg (bars)",         minval  = 1)
+i_legRight          = input(5,              "Right Pivot Leg (bars)",        minval  = 1)
+i_RangePct          = input(0.05,           "Range to allow the box to be drawn")
+
+// HTF is being used.
+var htfOn       = i_htfType != TF0
+// Price text size.
+var labelSize   = i_textSize == 1 ? size.tiny : i_textSize == 2 ? size.small : i_textSize == 3 ? size.normal : i_textSize == 4 ? size.large : size.huge
+// }
+
+
+// ———————————————————— Constants
+
+i_lineThicknessH    = 1
+i_lineBrightnessH   = 4
+i_lineThicknessL    = 1
+i_lineBrightnessL   = 4
+i_colorScheme       = CS2
+arr_max_idx         = 2*i_qtyPivots - 1
+
+// ———————————————————— Time Functions
+// {
+// ————— Generate colors for pivot lines and text using user-selected color scheme and brightness levels.
+f_cGreen(_b)    => _b == 8 ? #00FF00ff : _b == 7 ? #00FF00d0 : _b == 6 ? #00FF00b0 : _b == 5 ? #00FF0090 : _b == 4 ? #00FF0070 : _b == 3 ? #00FF0050 : _b == 2 ? #00FF0020 : _b == 1 ? #00FF0010 : na
+f_cAqua(_b)     => _b == 8 ? #00C0FFff : _b == 7 ? #00C0FFd0 : _b == 6 ? #00C0FFb0 : _b == 5 ? #00C0FF90 : _b == 4 ? #00C0FF70 : _b == 3 ? #00C0FF50 : _b == 2 ? #00C0FF20 : _b == 1 ? #00C0FF10 : na
+f_cOrange(_b)   => _b == 8 ? #FF8080ff : _b == 7 ? #FF8080d0 : _b == 6 ? #FF8080b0 : _b == 5 ? #FF808090 : _b == 4 ? #FF808070 : _b == 3 ? #FF808050 : _b == 2 ? #FF808020 : _b == 1 ? #FF808018 : na
+f_cRed(_b)      => _b == 8 ? #FF0000ff : _b == 7 ? #FF0000d0 : _b == 6 ? #FF0000b0 : _b == 5 ? #FF000090 : _b == 4 ? #FF000070 : _b == 3 ? #FF000050 : _b == 2 ? #FF000020 : _b == 1 ? #FF000010 : na
+f_cPink(_b)     => _b == 8 ? #FF0080ff : _b == 7 ? #FF0080d0 : _b == 6 ? #FF0080b0 : _b == 5 ? #FF008090 : _b == 4 ? #FF008070 : _b == 3 ? #FF008050 : _b == 2 ? #FF008020 : _b == 1 ? #FF008010 : na
+f_cViolet(_b)   => _b == 8 ? #AA00FFff : _b == 7 ? #AA00FFd0 : _b == 6 ? #AA00FFb0 : _b == 5 ? #AA00FF90 : _b == 4 ? #AA00FF70 : _b == 3 ? #AA00FF50 : _b == 2 ? #AA00FF38 : _b == 1 ? #AA00FF20 : na
+f_colorH(_b)    => i_colorScheme == CS0 ? f_cGreen(_b) : i_colorScheme == CS1 ? f_cAqua(_b) : f_cOrange(_b)
+f_colorL(_b)    => i_colorScheme == CS0 ? f_cRed(_b)   : i_colorScheme == CS1 ? f_cPink(_b) : f_cViolet(_b)
+var colorPH     =  f_colorH(i_lineBrightnessH)
+var colorPL     =  f_colorL(i_lineBrightnessL)
+var colorTextPH =  i_textBrightness == TB0 ? i_textColor == TX0 ? colorPH  : color.gray : i_textColor == TX0 ? f_colorH(5) : color.new(color.gray, 0)
+var colorTextPL =  i_textBrightness == TB0 ? i_textColor == TX0 ? colorPL  : color.gray : i_textColor == TX0 ? f_colorL(5) : color.new(color.gray, 0)
+// ————— Round prices to tick.
+f_roundToTick( _price) => round(_price / syminfo.mintick) * syminfo.mintick
+
+// ————— Produces a string format usable with `tostring()` to restrict precision to ticks.
+//  • Note that `tostring()` will also round the value.
+f_tickFormat() =>
+    _s = tostring(syminfo.mintick)
+    _s := str.replace_all(_s, "25", "00")
+    _s := str.replace_all(_s, "5",  "0")
+    _s := str.replace_all(_s, "1",  "0")
+
+// ————— Queues a new element in an array and de-queues its first element.
+f_qDq(_array, _val) =>
+    array.push(_array, _val)
+    array.shift(_array)
+
+// ————— Lookback to find chart bar where pivot occured.
+f_offsetToP(_src, _pivotPrice, _maxBack) =>
+    int _offset = na
+    float _delta = 10e10
+    if not na(_pivotPrice)
+        // There is a pivot price to check; loop back in limited number of bars for closest level matching pivot.
+        for _i = 1 to _maxBack
+            _thisDelta = abs(_src[_i] - _pivotPrice)
+            if _thisDelta < _delta
+                // Closer price found; save its offset.
+                _delta := _thisDelta
+                _offset := _i
+    _offset
+
+// —————————— PineCoders MTF Selection Framework functions
+// ————— Converts current "timeframe.multiplier" plus the TF into minutes of type float.
+f_resInMinutes() => 
+    _resInMinutes = timeframe.multiplier * (
+      timeframe.isseconds   ? 1. / 60.  :
+      timeframe.isminutes   ? 1.        :
+      timeframe.isdaily     ? 1440.     :
+      timeframe.isweekly    ? 10080.    :
+      timeframe.ismonthly   ? 43800.    : na)
+
+// ————— Returns resolution of _resolution period in minutes.
+f_tfResInMinutes(_resolution) =>
+    // _resolution: resolution of any TF (in "timeframe.period" string format).
+    security(syminfo.tickerid, _resolution, f_resInMinutes())
+
+// ————— Given current resolution, returns next step of HTF.
+f_resNextStep(_res) =>
+    // _res: current TF in fractional minutes.
+    _res    <= 1        ? "15"  :
+      _res  <= 5        ? "60"  :
+      _res  <= 30       ? "240" :
+      _res  <= 60       ? "1D"  :
+      _res  <= 360      ? "3D"  :
+      _res  <= 1440     ? "1W"  :
+      _res  <= 10080    ? "1M"  : "12M"
+
+// ————— Returns a multiple of current resolution as a string in "timeframe.period" format usable with "security()".
+f_multipleOfRes(_res, _mult) => 
+    // _res:  current resolution in minutes, in the fractional format supplied by f_resInMinutes() companion function.
+    // _mult: Multiple of current TF to be calculated.
+    // Convert current float TF in minutes to target string TF in "timeframe.period" format.
+    _targetResInMin = _res * max(_mult, 1)
+    _targetResInMin     <= 0.083        ? "5S"  :
+      _targetResInMin   <= 0.251        ? "15S" :
+      _targetResInMin   <= 0.501        ? "30S" :
+      _targetResInMin   <= 1440         ? tostring(round(_targetResInMin)) :
+      _targetResInMin   <= 43800        ? tostring(round(min(_targetResInMin / 1440, 365))) + "D" :
+      tostring(round(min(_targetResInMin / 43800, 12))) + "M"
+
+// ————— Print a label at end of chart.
+f_htfLabel(_txt, _y, _color, _offsetLabels) => 
+    _t = int(time + (f_resInMinutes() * _offsetLabels * 60000))
+    var _lbl = label.new(_t, _y, _txt, xloc.bar_time, yloc.price, #00000000, label.style_none, color.gray, size.large)
+    if barstate.islast
+        label.set_xy(_lbl, _t, _y)
+        label.set_text(_lbl, _txt)
+        label.set_textcolor(_lbl, _color)
+// }
+
+// ———————————————————— Pivot Functions
+// Function returns true when a cross is detected between the close and one of the pivots in the last n displayed.
+f_pivotCross(_direction, _pivots) =>
+    // _direction: direction of the cross to detect ("over" or "under").
+    // _pivots   : array of pivot prices to be tested against.
+    _return = false
+    _arr_max_idx = array.size(_pivots)
+    for _i = _arr_max_idx - 1 to 0
+        _pivotPrice = array.get(_pivots, _i)
+        if _direction == "over" and close[1] < _pivotPrice and close > _pivotPrice
+            _return := true
+            break
+        else if _direction == "under" and close[1] > _pivotPrice and close < _pivotPrice
+            _return := true
+            break
+    _return 
+
+// Function returns true when a cross is detected between the close and one of the pivots in the last n displayed.
+f_pivotCrossBoth(_pivots) =>
+    // _direction: direction of the cross to detect ("over" or "under").
+    // _pivots   : array of pivot prices to be tested against.
+    _return = false
+    _arr_max_idx = array.size(_pivots)
+    for _i = _arr_max_idx - 1 to 0
+        _pivotPrice = array.get(_pivots, _i)
+        if (close[1] < _pivotPrice and close > _pivotPrice) or (close[1] > _pivotPrice and close < _pivotPrice)
+            _return := true
+            break
+    _return 
+
+// Find the Pivot index of the sorted array that's closest and higher, and closest and lower
+f_findClosestPivots(_sorted_pivots, _val, _found_required_pivots) =>
+    _greater_idx = -1
+    _lesser_idx = -1
+    _arr_max_idx = int(i_qtyPivots) * 2 - 1
+    if _found_required_pivots
+        for _i = 0 to _arr_max_idx
+            _pivotPrice = array.get(_sorted_pivots, _i)
+            if _pivotPrice < _val
+                _lesser_idx := _i
+            // break after this because we only want one
+            if _pivotPrice >= _val
+                _greater_idx := _i
+                break
+    [_greater_idx, _lesser_idx]
+
+// _up = true => get a higher range
+//       false => get a lower range
+// return val: return an array of pivots in the range.
+f_getClosestRange(_sorted_pivots, _start_idx, _up, _range_pct, _found_required_pivots) =>
+    multiply_factor = _up ? (1 + _range_pct) : (1 - _range_pct)
+    _arr_max_idx = int(i_qtyPivots) * 2 - 1
+    _start_val = array.get(_sorted_pivots, _start_idx)
+    _pivots_in_range = array.new_float(1, _start_val) 
+    if not ((_start_idx == _arr_max_idx and _up) or (_start_idx == 0 and not _up))
+        _count = 0
+        // if its the first or last one, then it's special
+        if _up and _found_required_pivots
+            _range_top = _start_val * multiply_factor
+            // how many pivots are in the range of the start pivot
+            for _i = min(_start_idx+1, _arr_max_idx) to _arr_max_idx
+                float _pivotPrice = array.get(_sorted_pivots, int(_i))
+                if _pivotPrice > _range_top
+                    break
+                array.push(_pivots_in_range, _pivotPrice)
+                _count := _count + 1
+        else if not _up and _found_required_pivots
+            _range_bottom = _start_val * multiply_factor
+            for _i = max(0, _start_idx-1) to 0
+                float _pivotPrice = array.get(_sorted_pivots, int(_i))
+                if _pivotPrice < _range_bottom
+                    break
+                array.push(_pivots_in_range, _pivotPrice)
+                _count := _count + 1
+    _pivots_in_range
+
+f_get_line(_price, _pHiPrices, _pLoPrices, _pHiLabels, _pLoLabels) =>
+    label label_assoc = label(na)
+    hi_idx = array.indexof(_pHiPrices, _price)
+    if hi_idx != -1
+        label_assoc := array.get(_pHiLabels, hi_idx)
+    else
+        lo_idx = array.indexof(_pLoPrices, _price)
+        label_assoc := array.get(_pLoLabels, lo_idx)
+    // placement bar
+    x = label.get_x(label_assoc)
+    // price
+    y = label.get_y(label_assoc)
+    new_line = line.new(x, y, bar_index, y, xloc.bar_index, extend.right, colorPH, line.style_solid, i_lineThicknessH)
+    new_line
+
+f_get_lines(_range, _pHiPrices, _pLoPrices, _pHiLabels, _pLoLabels) =>
+    _lines_in_range = array.new_line()
+    _range_size = array.size(_range)
+    // get the first line
+    if _range_size > 0
+        _range_start = array.get(_range, 0)
+        _range_start_line = f_get_line(_range_start, _pHiPrices, _pLoPrices, _pHiLabels, _pLoLabels)
+        array.push(_lines_in_range, _range_start_line)
+    if _range_size > 1
+        _range_end = array.get(_range, _range_size-1)
+        _range_end_line = f_get_line(_range_end, _pHiPrices, _pLoPrices, _pHiLabels, _pLoLabels)
+        array.push(_lines_in_range, _range_end_line)
+    _lines_in_range
+
+f_get_line_color(_line, _ref) =>
+    _line_price = line.get_y1(_line)
+    _line_price > _ref ? color.orange : color.purple
+    
+// color above lines as orange and below lines as purple
+f_colorLines(_lines_in_range, _ref) =>
+    _lines_size = array.size(_lines_in_range)
+    if _lines_size == 1
+        _line = array.get(_lines_in_range, 0)
+        line.set_color(_line, f_get_line_color(_line, _ref))
+        line.set_width(_line, 4)
+    else if _lines_size > 1
+        _line_close = array.get(_lines_in_range, 0)
+        _col = f_get_line_color(_line_close, _ref)
+        line.set_color(_line_close, _col)
+        _line_far = array.get(_lines_in_range, 1)
+        line.set_color(_line_far, _col)
+
+f_build_range(_ref, _range, _pHiPrices, _pLoPrices, _pHiLabels, _pLoLabels) =>
+    _lines_in_range = f_get_lines(_range, _pHiPrices, _pLoPrices, _pHiLabels, _pLoLabels)
+    f_colorLines(_lines_in_range, _ref)
+    _lines_in_range
+
+f_delete_lines(_lines_in_range) =>
+    if array.size(_lines_in_range) > 0
+        for _i = 0 to array.size(_lines_in_range) - 1
+            line.delete(array.get(_lines_in_range, _i))
+
+// ———————————————————— Calcs
+// {
+// Arrays holding pivot line id's, label id's and prices.
+i_qtyPivots := int(i_qtyPivots)
+var pHiLines  = array.new_line(i_qtyPivots)
+var pLoLines  = array.new_line(i_qtyPivots)
+var pHiLabels = array.new_label(i_qtyPivots)
+var pLoLabels = array.new_label(i_qtyPivots)
+var pHiPrices = array.new_float(i_qtyPivots)
+var pLoPrices = array.new_float(i_qtyPivots)
+var pSortedPrices = array.new_float(i_qtyPivots*2)
+var pHiCount = 0
+var pLoCount = 0
+
+// ————— HTF calcs
+// Get current resolution in float minutes.
+var resInMinutes = f_resInMinutes()
+// Get HTF from user-defined mode.
+var htf = i_htfType == TF0 ? timeframe.period : i_htfType == TF1 ? f_resNextStep(resInMinutes) : i_htfType == TF2 ? f_multipleOfRes(resInMinutes, i_htfType2) : i_htfType3
+// Vertical position of label.
+labelY = sma(high + 3 * tr, 10)[1]
+// If current res is not lower than HTF, print warning at right of chart.
+if htfOn and resInMinutes >= f_tfResInMinutes(htf)
+    f_htfLabel("Chart\nresolution\nmust be < " + htf, labelY, color.silver, i_offsetLabels)
+else
+    // Show calculated HTF when needed.
+    if htfOn and i_htfShow
+        f_htfLabel(htf, labelY, color.silver, i_offsetLabels)
+
+// ————— Number of chart bars back contained in one HTF bar.
+chartBarsInHtf = int(f_tfResInMinutes(htf) / resInMinutes)
+// ————— Starting point offset where we can begin searching for a pivot.
+chartBarsOffset = int(((i_legRight) * chartBarsInHtf) + (i_htfRepaints ? 0 : 1))
+ 
+//
+// ————— Pivot calcs
+//
+pH    = pivothigh(i_srcH, i_legLeft, i_legRight)
+pL    = pivotlow( i_srcL, i_legLeft, i_legRight)
+
+// get HTF pivots
+htfPH = not htfOn ? pH : i_htfRepaints ? security(syminfo.tickerid, htf, pH) : security(syminfo.tickerid, htf, pH[1], lookahead = barmerge.lookahead_on)
+htfPL = not htfOn ? pL : i_htfRepaints ? security(syminfo.tickerid, htf, pL) : security(syminfo.tickerid, htf, pL[1], lookahead = barmerge.lookahead_on)
+newPH = na(htfPH[1]) and not(na(htfPH))
+newPL = na(htfPL[1]) and not(na(htfPL))
+
+// In case a pivot is found, find the offset to the bar matching its level [these functions need to be called on each bar]. Only send pivot value when one is found, so loop isn't executed on every bar.
+offsetToPH = f_offsetToP(i_srcH, newPH ? htfPH : na, min(maxBarsBack, max(30, chartBarsOffset + chartBarsInHtf + 1)))
+offsetToPL = f_offsetToP(i_srcL, newPL ? htfPL : na, min(maxBarsBack, max(30, chartBarsOffset + chartBarsInHtf + 1)))
+
+// Pivot values and line/label ids (each pivot uses a line and, if user-selected, a label for the price).
+line    linePH  = na
+line    linePL  = na
+// —————————— Main block where we decide first if we can run the rest of the script.
+if chartBarsOffset > maxBarsBack
+    // Dilation of HTF contains too many bars. Would cause referencing errors; can't run logic.
+    f_htfLabel("Can't run indicator.\nGap between chart res\nand HTF is too large.\n" + tostring(chartBarsOffset, "(#)"), labelY, f_cRed(8), i_offsetLabels)
+    float(na)
+else
+    // ————— If a new pivot is found, draw a new line and label at the offset found.
+    if newPH
+        pHiCount := pHiCount + 1
+        // Draw new pivot line.
+        linePH := i_showAll ? line.new(bar_index - offsetToPH, htfPH, bar_index, htfPH, xloc.bar_index, extend.right, colorPH, line.style_solid, i_lineThicknessH) : na
+        // Queue new pivot line and delete de-queued one.
+        line.delete(f_qDq(pHiLines, linePH))
+        // Queue new pivot's price.
+        f_qDq(pHiPrices, htfPH)
+        // Display price if needed.
+        if i_showPrices
+            // Draw new label.
+            labelPH = label.new(bar_index - offsetToPH, htfPH, "    " + tostring(f_roundToTick(htfPH), f_tickFormat()), xloc.bar_index, yloc.price, #00000000, label.style_none, colorTextPH, labelSize)
+            // Queue new price label and delete de-queued one.
+            label.delete(f_qDq(pHiLabels, labelPH))
+    if newPL
+        pLoCount := pLoCount + 1
+        linePL := i_showAll ? line.new(bar_index - offsetToPL, htfPL, bar_index, htfPL, xloc.bar_index, extend.right, colorPL, line.style_solid, i_lineThicknessL) : na
+        line.delete(f_qDq(pLoLines, linePL))
+        f_qDq(pLoPrices, htfPL)
+        if i_showPrices
+            labelPL = label.new(bar_index - offsetToPL, htfPL, "         " + tostring(f_roundToTick(htfPL), f_tickFormat()), xloc.bar_index, yloc.price, #00000000, label.style_none, colorTextPL, labelSize)
+            label.delete(f_qDq(pLoLabels, labelPL))
+    
+    // ————— Make last hi and lo pivot lines thicker, if required.
+    if barstate.islast and i_highlightLast and i_showAll
+        line.set_width(array.get(pHiLines, i_qtyPivots - 1), i_lineThicknessH * 4)
+        line.set_width(array.get(pLoLines, i_qtyPivots - 1), i_lineThicknessL * 4)
+    float(na)
+
+found_required_pivots = pHiCount >= i_qtyPivots and pLoCount >= i_qtyPivots
+plot(found_required_pivots ? 100 : na, title = "Found required", transp=100)
+if found_required_pivots and (newPH or newPL)
+    array.clear(pSortedPrices)
+    array.concat(pSortedPrices, pHiPrices)
+    array.concat(pSortedPrices, pLoPrices)
+    array.sort(pSortedPrices)
+
+[greater_idx, lesser_idx] = f_findClosestPivots(pSortedPrices, close, found_required_pivots)
+higher_idx = greater_idx == -1 ? na : greater_idx
+lower_idx = lesser_idx == -1 ? na : lesser_idx
+higher_val = not na(higher_idx) ? array.get(pSortedPrices, higher_idx) : na
+lower_val = not na(lower_idx) ? array.get(pSortedPrices, lower_idx) : na
+plot(higher_idx, title = "Higher Idx", color = color.orange, transp=100)
+plot(lower_idx, title = "Lower Idx", color = color.purple, transp=100)
+plot(higher_val, title = "Higher Val", color = color.orange, transp=100)
+plot(lower_val, title = "Lower Val", color = color.purple, transp=100)
+
+up_range = not na(higher_idx) ? f_getClosestRange(pSortedPrices, higher_idx, true, i_RangePct, found_required_pivots) : array.new_float()
+down_range = not na(lower_idx) ? f_getClosestRange(pSortedPrices, lower_idx, false, i_RangePct, found_required_pivots) : array.new_float()
+up_size = array.size(up_range)
+down_size = array.size(down_range)
+
+plot(up_size, title = "Num Pivots in Range Higher", transp=100)
+plot(down_size, title = "Num Pivots in Range Lower", transp=100)
+
+var up_lines = array.new_line()
+var down_lines = array.new_line()
+
+any_pivot_crossed = f_pivotCrossBoth(pSortedPrices)
+if any_pivot_crossed
+    f_delete_lines(up_lines)
+    f_delete_lines(down_lines)
+    array.clear(up_lines)
+    array.clear(down_lines)
+if up_size > 0 and any_pivot_crossed
+    up_lines := f_build_range(close, up_range, pHiPrices, pLoPrices, pHiLabels, pLoLabels)
+if down_size > 0 and any_pivot_crossed
+    down_lines := f_build_range(close, down_range, pHiPrices, pLoPrices, pHiLabels, pLoLabels)
+
+up_line_size = array.size(up_lines)
+down_line_size = array.size(down_lines)
+up_line1 = up_line_size > 0 ? array.get(up_lines, 0) : na
+up_line1_price = not na(up_line1) ? line.get_y1(up_line1) : na
+up_line2 = up_line_size > 1 ? array.get(up_lines, 1) : na
+up_line2_price = not na(up_line2) ? line.get_y1(up_line2) : na
+plot(up_line1_price, title = "upline 1 price", color=color.orange, transp=100)
+plot(up_line2_price, title = "upline 2 price", color=color.orange, transp=100)
+
+down_line1 = down_line_size > 0 ? array.get(down_lines, 0) : na
+down_line1_price = not na(down_line1) ? line.get_y1(down_line1) : na
+down_line2 = down_line_size > 1 ? array.get(down_lines, 1) : na
+down_line2_price = not na(down_line2) ? line.get_y1(down_line2) : na
+plot(down_line1_price, title = "downline 1 price", color=color.purple, transp=100)
+plot(down_line2_price, title = "downline 2 price", color=color.purple, transp=100)
+
+
+// ———————————————————— Debugging lines
+// ———————————————————— Comment in or out pending on what you want to see
+// first_above =  up_size > 0 ? array.get(up_range, 0) : na
+// first_above =  up_size > 0 ? array.get(up_range, 0) : na
+// test = not na(first_above) ? array.includes(pHiPrices, first_above) : false
+// plot( test ? 100 : na, title = "First above is PivHi", transp=100 )
+
+// second_above = up_size > 1 ? array.get(up_range, 1) : na
+// third_above =  up_size > 2 ? array.get(up_range, 2) : na
+// fourth_above = up_size > 3 ? array.get(up_range, 3) : na
+// fifth_above =  up_size > 4 ? array.get(up_range, 4) : na
+
+// plot(first_above,  title = "First Above", color=color.green, transp=100)
+// plot(second_above, title = "Second Above",color=color.green, transp=100)
+// plot(third_above,  title = "Third Above", color=color.green, transp=100)
+// plot(fourth_above, title = "Fourth Above",color=color.green, transp=100)
+// plot(fifth_above,  title = "Fifth Above", color=color.green, transp=100)
+
+// first_below =  down_size > 0 ? array.get(down_range, 0) : na
+// second_below = down_size > 1 ? array.get(down_range, 1) : na
+// third_below =  down_size > 2 ? array.get(down_range, 2) : na
+// fourth_below = down_size > 3 ? array.get(down_range, 3) : na
+// fifth_below =  down_size > 4 ? array.get(down_range, 4) : na
+// plot(first_below,  title = "First Below", color=color.red, transp=100)
+// plot(second_below, title = "Second Below",color=color.red, transp=100)
+// plot(third_below,  title = "Third Below", color=color.red, transp=100)
+// plot(fourth_below, title = "Fourth Below",color=color.red, transp=100)
+// plot(fifth_below,  title = "Fifth Below", color=color.red, transp=100)
+
+// pSortedSize = array.size(pSortedPrices)
+// first_sorted =  pSortedSize > 25 ? array.get(pSortedPrices, 25) : na
+// second_sorted = pSortedSize > 26 ? array.get(pSortedPrices, 26) : na
+// third_sorted =  pSortedSize > 27 ? array.get(pSortedPrices, 27) : na
+// fourth_sorted = pSortedSize > 28 ? array.get(pSortedPrices, 28) : na
+// fifth_sorted =  pSortedSize > 29 ? array.get(pSortedPrices, 29) : na
+// plot(first_sorted,  title = "First Sorted",  transp=100)
+// plot(second_sorted, title = "Second Sorted", transp=100)
+// plot(third_sorted,  title = "Third Sorted",  transp=100)
+// plot(fourth_sorted, title = "Fourth Sorted", transp=100)
+// plot(fifth_sorted,  title = "Fifth Sorted",  transp=100)
+
+
